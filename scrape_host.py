@@ -59,16 +59,25 @@ def get_api_credentials():
 
 def parse_host_id_from_url(host_url: str) -> str:
     """
-    Accepte par ex:
+    Accepte:
     - https://www.airbnb.com/users/show/12345678
     - https://fr.airbnb.ca/users/show/12345678?...
-    Retourne: "12345678"
+    - https://fr.airbnb.ca/users/profile/1470630909781985417
+    - 12345678 (ID direct)
+    Retourne: l'ID en string
     """
     if not host_url:
         return ""
+
+    s = host_url.strip()
+
+    # Cas: l'utilisateur colle juste un ID
+    if re.fullmatch(r"\d{5,25}", s):
+        return s
+
     try:
-        path = urlparse(host_url).path  # /users/show/123
-        m = re.search(r"/users/show/(\d+)", path)
+        path = urlparse(s).path  # ex: /users/profile/1470...
+        m = re.search(r"/users/(?:show|profile)/(\d+)", path)
         return m.group(1) if m else ""
     except Exception:
         return ""
@@ -100,7 +109,6 @@ def extract_license_code(text):
         r"Permit\s+(?:Number|No\.?)",
     ]
 
-    pattern = r"(?: " + r"|".join(keywords) + r")"
     pattern = r"(?:%s)[:\s]*([^,\n]+)" % ("|".join(keywords))
 
     match = re.search(pattern, text_clean, re.IGNORECASE)
@@ -158,6 +166,7 @@ def fetch_host_profile_fields(host_id: str, host_cache: dict):
 
         if host_details_response and isinstance(host_details_response, dict) and "errors" not in host_details_response:
             data = host_details_response.get("data", {})
+
             node = data.get("node", {})
             host_rating_stats = node.get("hostRatingStats", {})
             host_rating = host_rating_stats.get("ratingAverage", "")
@@ -225,7 +234,7 @@ def extract_listing_data(room_id: str, details: dict, host_cache: dict):
         "host_reviews_count": host_fields["host_reviews_count"],
         "host_joined_year": host_fields["host_joined_year"],
         "host_years_active": host_fields["host_years_active"],
-        "host_total_listings_in_dubai": host_fields["host_total_listings"],  # même nom de colonne que ton CSV
+        "host_total_listings_in_dubai": host_fields["host_total_listings"],  # même colonne que ton CSV Dubai
     }
 
 
@@ -267,12 +276,11 @@ def get_room_ids_from_host(host_id: str):
             if rid:
                 room_ids.append(str(rid))
         else:
-            # parfois ce peut être juste un id ou autre structure
             s = str(it).strip()
             if s.isdigit():
                 room_ids.append(s)
 
-    # unique
+    # unique, en gardant l'ordre
     return list(dict.fromkeys(room_ids))
 
 
@@ -284,7 +292,7 @@ def main():
 
     host_id = parse_host_id_from_url(host_url)
     if not host_id:
-        print("❌ Impossible d'extraire host_id depuis l'URL. Il faut /users/show/<ID>", flush=True)
+        print("❌ Impossible d'extraire host_id depuis l'URL. Formats acceptés: /users/show/<ID> ou /users/profile/<ID> ou ID direct.", flush=True)
         return
 
     print("=" * 80)
@@ -292,6 +300,9 @@ def main():
     print(f"👤 Host URL: {host_url}")
     print(f"🆔 Host ID: {host_id}")
     print("=" * 80)
+
+    # Créer un CSV vide dès le début pour que l'artifact existe même en cas d'erreur
+    write_csv([])
 
     processed_ids = load_processed_ids()
     host_cache = {}
